@@ -86,10 +86,10 @@ cdef class SparseSkipList(object):
             free(self.found)
         
     def __setitem__(self, key, value):
-        self.find(key, value, insert=1)
+        self.upsert(key, value)
     
     def __getitem__(self, key):
-        return self.find(key, 0, insert=0)
+        return self.find(key)
     
     cdef SkipNode* getHead(self):
         return self.head
@@ -117,33 +117,44 @@ cdef class SparseSkipList(object):
             else:
                 curr2 = other.jumpTo(curr2, curr1.index)
         return result
-        
-    cdef float find(self, int index, float value, int insert = 1):
+    
+    cdef upsert(self, int index, float value):
+        cdef SkipNode* candidate
+        cdef int newHeight
+        cdef int i
+        if value == 0:
+            return
+        self.updateList(index)
+        if self.found[0] is not NULL:
+            candidate = self.found[0].next[0]
+            if candidate != NULL and candidate.index == index:
+                candidate.value = value
+                # found and updated
+                return
+        # insert a new node
+        newHeight = randomHeight()
+        candidate = newSkipNode(newHeight, index, value)
+        for i in xrange(newHeight):
+            candidate.next[i] = self.found[i].next[i]
+            self.found[i].next[i] = candidate
+        if newHeight > self.height: 
+            self.height = newHeight
+        self.size += 1
+        self.memory += sizeof(candidate)
+
+    cdef float find(self, int index):
         self.updateList(index)
         cdef SkipNode* candidate
         if self.found[0] is not NULL:
             candidate = self.found[0].next[0]
             if candidate != NULL and candidate.index == index:
                 return candidate.value
-        cdef int newHeight
-        cdef int i
-        if insert is not 0:
-            newHeight = randomHeight()
-            candidate = newSkipNode(newHeight, index, value)
-            for i in xrange(newHeight):
-                candidate.next[i] = self.found[i].next[i]
-                self.found[i].next[i] = candidate
-            if newHeight > self.height: 
-                self.height = newHeight
-            self.size += 1
-            self.memory += sizeof(candidate)
-            return candidate.value
         return 0
     
     def contains(self, index):
-        return self.find(index, 0, insert=0) != 0
+        return self.find(index) != 0
 
-    cdef updateList(self, int index):
+    cdef inline updateList(self, int index):
         cdef int i
         cdef SkipNode* curr = self.getHead()
         for i in reversed(xrange(self.height)):

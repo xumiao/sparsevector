@@ -8,9 +8,9 @@ import numpy as np
 
 import pyximport; pyximport.install(setup_args={"include_dirs":np.get_include()}, reload_support=True)
 
-#from sparse_vecotr import DenseArray, SparseArray                
-#from sparse_block_vector import SparseBlockArray
-#from sparse_skiplist_vector import SparseSkipList
+from sparse_vecotr import DenseArray, SparseArray                
+from sparse_block_vector import SparseBlockArray
+from sparse_skiplist_vector import SparseSkipList
 
 from timeit import timeit
 
