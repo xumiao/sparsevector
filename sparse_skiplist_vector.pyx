@@ -55,7 +55,7 @@ cdef void delSkipList(SkipNode* head):
 
 cdef int randomHeight():
     cdef int height = 1
-    while rand() > 0.5:
+    while rand() & 1:
         height += 1
     if height > MAX_HEIGHT:
         return MAX_HEIGHT
