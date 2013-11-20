@@ -95,13 +95,13 @@ def experRandomBlockInsert(blockSize, jumpRange, sz, arrayLength):
 #    number=100)
 #    print denseResult
     
-#    sparseResult = timeit("for key, value in data: a[key] = value", \
-#    setup = "from sparse_vector import SparseArray;\
-#    import sparse_vector_tester as svt;\
-#    a=SparseArray();\
-#    data = svt.generateRandomBlockSparseData(blockSize=%d, jumpRange=%d, sz=%d)"%(blockSize, jumpRange, sz),\
-#    number=1)
-#    print sparseResult
+    sparseResult = timeit("for key, value in data: a[key] = value", \
+    setup = "from sparse_vector import SparseArray;\
+    import sparse_vector_tester as svt;\
+    a=SparseArray();\
+    data = svt.generateRandomBlockSparseData(blockSize=%d, jumpRange=%d, sz=%d)"%(blockSize, jumpRange, sz),\
+    number=1)
+    print sparseResult
 
     sparseSkipListResult = timeit("for key, value in data: a[key] = value", \
     setup = "from sparse_skiplist_vector import SparseSkipList;\
@@ -119,6 +119,21 @@ def experRandomBlockInsert(blockSize, jumpRange, sz, arrayLength):
     number=10)
     print sparseSkipListArrayResult
  
+def experSequentialRandomMemory(sz, sparsity, arrayLength):
+    data = generateRandomSparseData(sparsity=sparsity, sz=sz)
+    a = DenseArray(sz)
+    b = SparseArray()
+    c = SparseSkipList()
+    d = SparseSkipListArray(arrayLength)
+    addData(a, data)
+    addData(b, data)
+    addData(c, data)
+    addData(d, data)
+    print "Dense ", a.memorySize()
+    print "Sparse ", b.memorySize()
+    print "SparseList ", c.memorySize(), c.height, c.size
+    print "SparseListArray ", d.memorySize(), d.height, d.size
+
 def experSequentialRandomDotSelf(sz, sparsity, arrayLength):
     denseResult = timeit("a.dot(a)", \
     setup="from sparse_vector import DenseArray; \

@@ -12,7 +12,7 @@ from libc.stdlib cimport malloc, free, rand
 
 cdef struct SkipNode:
     int height
-    int index
+    long long index
     float value
     SkipNode** next
 
@@ -20,7 +20,7 @@ ctypedef SkipNode* SkipNode_t
 
 cdef int MAX_HEIGHT = 100
 
-cdef SkipNode* newSkipNode(int height, int index, float value):
+cdef SkipNode* newSkipNode(int height, long long index, float value):
     #height > 0
     cdef SkipNode* sn = <SkipNode*>malloc(cython.sizeof(SkipNode))
     cdef int i
@@ -36,7 +36,7 @@ cdef SkipNode* newSkipNode(int height, int index, float value):
         sn.next[i] = NULL
     return sn
 
-cdef int sizeof(SkipNode* sn):
+cdef long long sizeof(SkipNode* sn):
     return cython.sizeof(SkipNode) + cython.sizeof(SkipNode_t) * sn.height
 
 cdef void delSkipNode(SkipNode* sn):
@@ -64,23 +64,24 @@ cdef int randomHeight():
 
 cdef class SparseSkipList(object):
     cpdef public int height
-    cpdef public int size
-    cpdef public int memory
+    cpdef public long long size
+    cpdef public long long memory
     cdef SkipNode* head
     cdef SkipNode** found
     
     def __init__(self):
-        self.size = 0
+        self.size   = 0
+        self.height = 0
         self.head = newSkipNode(MAX_HEIGHT, -1, -1)
         self.found = <SkipNode**>malloc(MAX_HEIGHT * cython.sizeof(SkipNode_t))
         cdef int i
         if self.found is NULL:
             raise MemoryError()
         for i in xrange(MAX_HEIGHT):
-            self.found[i] = self.head
+            self.found[i] = self.head        
         self.memory = MAX_HEIGHT * cython.sizeof(SkipNode_t) + sizeof(self.head)
     
-    def __del__(self):
+    def __dealloc__(self):
         delSkipList(self.head)
         if self.found is not NULL:
             free(self.found)
@@ -100,7 +101,7 @@ cdef class SparseSkipList(object):
     def add(self, other, w):
         pass
     
-    cdef inline SkipNode* jumpTo(self, SkipNode* curr, int target):
+    cdef inline SkipNode* jumpTo(self, SkipNode* curr, long long target):
         return curr.next[0]
         
     cpdef float dot(self, SparseSkipList other):
@@ -118,7 +119,7 @@ cdef class SparseSkipList(object):
                 curr2 = other.jumpTo(curr2, curr1.index)
         return result
     
-    cdef upsert(self, int index, float value):
+    cdef upsert(self, long long index, float value):
         cdef SkipNode* candidate
         cdef int newHeight
         cdef int i
@@ -131,18 +132,19 @@ cdef class SparseSkipList(object):
                 candidate.value = value
                 # found and updated
                 return
+        
         # insert a new node
         newHeight = randomHeight()
         candidate = newSkipNode(newHeight, index, value)
         for i in xrange(newHeight):
             candidate.next[i] = self.found[i].next[i]
             self.found[i].next[i] = candidate
-        if newHeight > self.height: 
+        if newHeight > self.height:
             self.height = newHeight
         self.size += 1
         self.memory += sizeof(candidate)
 
-    cdef float find(self, int index):
+    cdef float find(self, long long index):
         self.updateList(index)
         cdef SkipNode* candidate
         if self.found[0] is not NULL:
@@ -154,7 +156,7 @@ cdef class SparseSkipList(object):
     def contains(self, index):
         return self.find(index) != 0
 
-    cdef inline updateList(self, int index):
+    cdef inline updateList(self, long long index):
         cdef int i
         cdef SkipNode* curr = self.getHead()
         for i in reversed(xrange(self.height)):
