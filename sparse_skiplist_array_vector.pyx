@@ -24,6 +24,12 @@ cdef struct SkipNodeA:
 
 ctypedef SkipNodeA* SkipNodeA_t
 
+cdef inline _FABS(float v):
+    if v > 0:
+        return v
+    else:
+        return -v
+        
 cdef inline _MEM_CHECK(void* p):
     if p is NULL:
         raise MemoryError()
@@ -145,30 +151,16 @@ cdef class SparseSkipListArray(object):
         return self.find(key)
     
     def __delitem_(self, key):
-        self.upsert(key, 0)
+        if self.find(key) != 0:
+            self.upsert(key, 0)
     
-    def memorySize(self):
-        return self.memory
-    
-    def numOfNodes(self):
-        return self.size
-    
-    def maxHeight(self):
-        return self.height
-        
-    def add(self, other, w):
-        pass
-
-    def __contains__(self, index):
-        return self.find(index) != 0
+    def __contains__(self, key):
+        return self.find(key) != 0
     
     def __str__(self):
-        return repr(self)
-        
-    def __repr__(self):
         a = []
         cdef SkipNodeA* curr = self.head
-        cdef i
+        cdef int i
         while curr.next[0] != NULL:
             curr = curr.next[0]
             a.append('(' + repr(curr.index) + ')')
@@ -177,6 +169,36 @@ cdef class SparseSkipListArray(object):
                     a.append(':'.join([repr(i + curr.index), repr(curr.values[i])]))
         return ' '.join(a)
         
+    def __repr__(self):
+        return repr(self.generic())
+
+    def _memorySize(self):
+        return self.memory
+    
+    def _numOfNodes(self):
+        return self.size
+    
+    def _maxHeight(self):
+        return self.height
+    
+    def generic(self):
+        cdef dict a = {}
+        cdef SkipNodeA* curr = self.head
+        cdef int i
+        while curr.next[0] != NULL:
+            curr = curr.next[0]
+            for i in xrange(curr.length):
+                if curr.values[i] != 0:
+                    a[i + curr.index] = curr.values[i]
+        return a
+        
+    cpdef update(self, dict f):
+        cdef list kvps = f.items()
+        cdef long long sz = len(kvps)
+        cdef long long i
+        for i in xrange(sz):
+            self.upsert(kvps[i][0], kvps[i][1])
+            
     cdef int randomHeight(self):
         cdef int height = 1
         while rand() & 1:
@@ -194,10 +216,67 @@ cdef class SparseSkipListArray(object):
             if curr.next[i] is NULL or curr.next[i].index > target:
                 return curr.next[i - 1]
         return curr.next[i]
-
+    
+    cpdef scale(self, float w):
+        cdef SkipNodeA* curr = self.head.next[0]
+        cdef int i
+        while curr is not NULL:
+            for i in xrange(self.arrayLength):
+                curr.values[i] *= w
+            curr = curr.next[0]
+    
+    cpdef float norm1(self):
+        cdef SkipNodeA* curr = self.head.next[0]
+        cdef int i
+        cdef float result = 0.0
+        while curr is not NULL:
+            for i in xrange(self.arrayLength):
+                result += _FABS(curr.values[i])
+            curr = curr.next[0]
+        return result
+    
+    cpdef float norm2(self):
+        cdef SkipNodeA* curr = self.head.next[0]
+        cdef int i
+        cdef float result = 0.0
+        while curr is not NULL:
+            for i in xrange(self.arrayLength):
+                result += curr.values[i] * curr.values[i]
+            curr = curr.next[0]
+        return result
+    
+    cpdef trim(self, float tol = 0.00001):
+        cdef SkipNodeA* curr = self.head.next[0]
+        cdef int i
+        while curr is not NULL:
+            for i in xrange(self.arrayLength):
+                if (_FABS(curr.values[i]) < tol):
+                    curr.values[i] = 0
+            curr = curr.next[0]
+        
+    cpdef add(self, SparseSkipListArray other, float w):
+        cdef SkipNodeA* curr1 = self.head.next[0]
+        cdef SkipNodeA* curr2 = other.head.next[0]
+        cdef int i
+        while curr1 is not NULL and curr2 is not NULL:
+            if curr1.index == curr2.index:
+                for i in xrange(self.arrayLength):
+                   curr1.values[i] += w * curr2.values[i]   
+                curr1 = curr1.next[0]
+                curr2 = curr2.next[0]
+            elif curr1.index < curr2.index:
+                curr1 = curr1.next[0]
+            else:
+                self.updateList(curr2.index)
+                self.copyNodeA(curr2, w)
+                curr2 = curr2.next[0]
+        if curr2 is not NULL:
+            self.updateList(curr2.index)
+            while curr2 is not NULL:
+                self.copyNodeA(curr2, w)
+                curr2 = curr2.next[0]
+            
     cpdef float dot(self, SparseSkipListArray other):
-        cdef int incx = 1
-        cdef int incy = 1
         cdef SkipNodeA* curr1 = self.head.next[0]
         cdef SkipNodeA* curr2 = other.head.next[0]
         cdef float result = 0.0
@@ -212,7 +291,7 @@ cdef class SparseSkipListArray(object):
                 curr2 = curr2.next[0]
         return result
     
-    cdef bint updateList(self, long long index):
+    cpdef bint updateList(self, long long index):
         cdef int i
         cdef SkipNodeA* curr = self.head
         for i in reversed(xrange(self.height)):
@@ -221,6 +300,17 @@ cdef class SparseSkipListArray(object):
             self.found[i] = curr
         return self.found[0] is not NULL
 
+    cpdef float find(self, long long index):
+        if self.updateList(index):
+            return _GET_VALUE(self.found[0].next[0], index)
+        else:
+            return 0
+
+    # for debugging usage    
+    def printFound(self):
+        for i in xrange(self.height):
+            print self.found[i].index
+        
     cdef upsert(self, long long index, float value):
         cdef int newHeight
         cdef int i
@@ -235,9 +325,80 @@ cdef class SparseSkipListArray(object):
             self.size += 1
             self.memory += sizeofSN(candidate)
 
-    cdef float find(self, long long index):
-        if self.updateList(index):
-            return _GET_VALUE(self.found[0].next[0], index)
+    cdef copyNodeA(self, SkipNodeA* sn, float w):
+        cdef SkipNodeA* candidate
+        cdef int newHeight
+        cdef int i
+        newHeight = self.randomHeight()
+        candidate = newSkipNodeA(newHeight, sn.index, 0, self.arrayLength)
+        for i in xrange(newHeight):
+            candidate.next[i] = self.found[i].next[i]
+            self.found[i].next[i] = candidate
+            self.found[i] = candidate
+        self.size += 1
+        self.memory += sizeofSN(candidate)
+        for i in xrange(self.arrayLength):
+           candidate.values[i] += w * sn.values[i]
+
+cpdef SparseSkipListArray difference(SparseSkipListArray a, SparseSkipListArray b, float tol = 1e-8):
+    if (a.arrayLength != b.arrayLength):
+        return None
+        
+    cdef SparseSkipListArray c = SparseSkipListArray(a.arrayLength)
+    c.add(a,  1)
+    c.add(b, -1)
+    c.trim(tol)
+    return c
+    
+cdef inline float _MATCH(float v1, float v2, float tol):
+    if v1 == 0 and v2 == 0:
+        return 0
+    elif _FABS(v1 - v2) < tol:
+        return 1
+    else:
+        return -1
+    
+cpdef SparseSkipListArray matching(SparseSkipListArray a, SparseSkipListArray b, float tol = 0.01):
+    if (a.arrayLength != b.arrayLength):
+        return None
+        
+    cdef int L = a.arrayLength
+    cdef SparseSkipListArray c = SparseSkipListArray(L)
+    cdef SkipNodeA* curr1 = a.head.next[0]
+    cdef SkipNodeA* curr2 = b.head.next[0]
+    cdef int i
+    cdef float v
+    while curr1 is not NULL and curr2 is not NULL:
+        if curr1.index == curr2.index:
+            for i in xrange(L):
+                v = _MATCH(curr1.values[i], curr2.values[i], tol)
+                if v != 0:
+                    c[i + curr1.index] = v
+            curr1 = curr1.next[0]
+            curr2 = curr2.next[0]
+        elif curr1.index < curr2.index:
+            for i in xrange(L):
+                if curr1.values[i] != 0:
+                    c[i + curr1.index] = -1
+            curr1 = curr1.next[0]
         else:
-            return 0
-                   
+            for i in xrange(L):
+                if curr2.values[i] != 0:
+                    c[i + curr2.index] = -1
+            curr2 = curr2.next[0]
+            
+    if curr1 is not NULL:
+        while curr1 is not NULL:
+            for i in xrange(L):
+                if curr1.values[i] != 0:
+                    c[i + curr1.index] = -1            
+            curr1 = curr1.next[0]
+            
+    if curr2 is not NULL:
+        while curr2 is not NULL:
+            for i in xrange(L):
+                if curr2.values[i] != 0:
+                    c[i + curr2.index] = -1            
+            curr2 = curr2.next[0]
+            
+    return c

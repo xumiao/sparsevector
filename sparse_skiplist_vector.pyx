@@ -36,7 +36,7 @@ cdef SkipNode* newSkipNode(int height, long long index, float value):
         sn.next[i] = NULL
     return sn
 
-cdef long long sizeof(SkipNode* sn):
+cdef long long _sizeof(SkipNode* sn):
     return cython.sizeof(SkipNode) + cython.sizeof(SkipNode_t) * sn.height
 
 cdef void delSkipNode(SkipNode* sn):
@@ -96,7 +96,13 @@ cdef class SparseSkipList(object):
         return self.head
             
     def memorySize(self):
-        return self.memory
+        cdef long long size = _sizeof(self.head) + MAX_HEIGHT * cython.sizeof(SkipNode_t)
+        cdef SkipNode* curr = self.head.next[0]
+        while curr != NULL:
+            size += _sizeof(curr)
+            curr = curr.next[0]
+        return size
+
     
     def add(self, other, w):
         pass
