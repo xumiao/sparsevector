@@ -10,7 +10,6 @@ import pyximport; pyximport.install(setup_args={"include_dirs":np.get_include() 
 
 from sparse_vector import SparseVector                
 from sparse_vectorp import DenseArray, SparseArray
-from sparse_block_vector import SparseBlockArray
 from sparse_skiplist_vector import SparseSkipList
 from sparse_skiplist_array_vector import SparseSkipListArray
 
@@ -291,12 +290,12 @@ def experSequentialRandomDot(sz, sparsity1, sparsity2, arrayLength):
     svt.addData(a,data);\
     b=SparseVector();\
     data = svt.generateRandomSparseData(sparsity=%f, sz=%d);\
-    svt.addData(a, data)"%(sparsity1,sz,sparsity2,sz),\
+    svt.addData(b, data)"%(sparsity1,sz,sparsity2,sz),\
     number=100)
     print sparseVectorResult 
 
 def experSequentialRandomAdd(sz, sparsity1, sparsity2, arrayLength):
-    denseResult = timeit("a.add(b,1)", \
+    denseResult = timeit("[a.add(b,1) for i in range(10)]", \
     setup="from sparse_vectorp import DenseArray; \
     import sparse_vector_tester as svt;\
     sz = %d;\
@@ -309,7 +308,7 @@ def experSequentialRandomAdd(sz, sparsity1, sparsity2, arrayLength):
     number=100)
     print denseResult
     
-    sparseResult = timeit("a.add(b,1)", \
+    sparseResult = timeit("[a.add(b,1) for i in range(10)]", \
     setup = "from sparse_vectorp import SparseArray;\
     import sparse_vector_tester as svt;\
     a=SparseArray();\
@@ -321,19 +320,19 @@ def experSequentialRandomAdd(sz, sparsity1, sparsity2, arrayLength):
     number=100)
     print sparseResult
 
-    sparseSkipListResult = timeit("a.add(b,1)", \
-    setup = "from sparse_skiplist_vector import SparseSkipList;\
-    import sparse_vector_tester as svt;\
-    a=SparseSkipList();\
-    data = svt.generateRandomSparseData(sparsity=%f, sz=%d);\
-    svt.addData(a,data);\
-    b=SparseSkipList();\
-    data = svt.generateRandomSparseData(sparsity=%f, sz=%d);\
-    svt.addData(b, data)"%(sparsity1,sz,sparsity2,sz),\
-    number=100)
-    print sparseSkipListResult
+#    sparseSkipListResult = timeit("a.add(b,1)", \
+#    setup = "from sparse_skiplist_vector import SparseSkipList;\
+#    import sparse_vector_tester as svt;\
+#    a=SparseSkipList();\
+#    data = svt.generateRandomSparseData(sparsity=%f, sz=%d);\
+#    svt.addData(a,data);\
+#    b=SparseSkipList();\
+#    data = svt.generateRandomSparseData(sparsity=%f, sz=%d);\
+#    svt.addData(b, data)"%(sparsity1,sz,sparsity2,sz),\
+#    number=100)
+#    print sparseSkipListResult
 
-    sparseSkipListArrayResult = timeit("a.add(b,1)", \
+    sparseSkipListArrayResult = timeit("[a.add(b,1) for i in range(10)]", \
     setup = "from sparse_skiplist_array_vector import SparseSkipListArray;\
     import sparse_vector_tester as svt;\
     a=SparseSkipListArray(%d);\
@@ -345,7 +344,7 @@ def experSequentialRandomAdd(sz, sparsity1, sparsity2, arrayLength):
     number=100)
     print sparseSkipListArrayResult    
 
-    sparseVectorResult = timeit("a.add(b,1)", \
+    sparseVectorResult = timeit("[a.add(b,1) for i in range(10)]", \
     setup = "from sparse_vector import SparseVector;\
     import sparse_vector_tester as svt;\
     a=SparseVector();\
@@ -353,7 +352,8 @@ def experSequentialRandomAdd(sz, sparsity1, sparsity2, arrayLength):
     svt.addData(a,data);\
     b=SparseVector();\
     data = svt.generateRandomSparseData(sparsity=%f, sz=%d);\
-    svt.addData(a, data)"%(sparsity1,sz,sparsity2,sz),\
+    svt.addData(b, data);\
+    a.add(b,1)"%(sparsity1,sz,sparsity2,sz),\
     number=100)
     print sparseVectorResult 
     
@@ -466,19 +466,19 @@ def experRandomBlockAdd(blockSize, jumpRange, sz, arrayLength):
     addData(b, dataB)
     a.add(b, 2)
     
-    sparseSkipListResult = timeit("a.add(b,2)", \
-    setup = "from sparse_skiplist_vector import SparseSkipList;\
-    import sparse_vector_tester as svt;\
-    a=SparseSkipList();\
-    data = svt.generateRandomBlockSparseData(blockSize=%d, jumpRange=%d, sz=%d);\
-    svt.addData(a, data);\
-    b=SparseSkipList();\
-    data = svt.generateRandomBlockSparseData(blockSize=%d, jumpRange=%d, sz=%d);\
-    svt.addData(b, data)"%(blockSize, jumpRange, sz, blockSize, jumpRange, sz),\
-    number=10)
-    print sparseSkipListResult
+#    sparseSkipListResult = timeit("a.add(b,2);a.add(b,2);a.add(b,2);a.add(b,2)", \
+#    setup = "from sparse_skiplist_vector import SparseSkipList;\
+#    import sparse_vector_tester as svt;\
+#    a=SparseSkipList();\
+#    data = svt.generateRandomBlockSparseData(blockSize=%d, jumpRange=%d, sz=%d);\
+#    svt.addData(a, data);\
+#    b=SparseSkipList();\
+#    data = svt.generateRandomBlockSparseData(blockSize=%d, jumpRange=%d, sz=%d);\
+#    svt.addData(b, data)"%(blockSize, jumpRange, sz, blockSize, jumpRange, sz),\
+#    number=10)
+#    print sparseSkipListResult
 
-    sparseSkipListArrayResult = timeit("a.add(b,2)", \
+    sparseSkipListArrayResult = timeit("[a.add(b,2) for i in range(10)]", \
     setup = "from sparse_skiplist_array_vector import SparseSkipListArray;\
     import sparse_vector_tester as svt;\
     a=SparseSkipListArray(%d);\
@@ -490,7 +490,7 @@ def experRandomBlockAdd(blockSize, jumpRange, sz, arrayLength):
     number=10)
     print sparseSkipListArrayResult
     
-    sparseVectorResult = timeit("a.add(b,2)", \
+    sparseVectorResult = timeit("[a.add(b,2) for i in range(10)]", \
     setup = "from sparse_vector import SparseVector;\
     import sparse_vector_tester as svt;\
     a=SparseVector();\

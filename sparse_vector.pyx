@@ -1,7 +1,22 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sat Oct 12 22:32:16 2013
-
+Highly optimized Sparse Vector implemented based on SkipList
+It has the following advantages:
+1. Allows dynamic insertion, deletion, and modification. 
+   All in O(logn) scale due to SkipList properties.
+2. Smoothly transits from sparse vector and dense vector, when the indices are adjacent.
+   If the resulting index space contains entire range, e.g., [1,2,3], it behaves like a dense array.
+   If the resulting indices are completely seperated, e.g., [1,3,5], it behaves like a SkipList.
+   If the resulting indices are partially connected, e.g., [1,2,5], it is a SkipList on top of segments.
+3. It speedups the following computation scenarios on vector addition and dot products:
+   1). Very sparse data operations. 
+   2). Dense data operations.
+   3). Very sparse data on Dense data.
+4. It saves quite amount of memory on both dense and sparse data
+5. It performs moderately worse in mildly sparse data, i.e., sparsity range between 0.3-0.8.
+   About 20 times slower than numpy array
+   
 @author: xm
 """
 #cython: boundscheck=False
@@ -13,7 +28,7 @@ cimport cython
 from libc.stdlib cimport malloc, free, rand, calloc, realloc, RAND_MAX
 
 cdef int MAX_HEIGHT = 32
-cdef long MAX_CAPACITY = 2 << 12
+cdef long MAX_CAPACITY = 2 << 16
 
 cdef struct SkipNodeA:
     int height
@@ -134,6 +149,21 @@ cdef SkipNodeA* _newSkipNodeA(int height, long long index, float value):
     sn.nextA = _newSkipNodeS(height, NULL)
     return sn
 
+cdef SkipNodeA* _copySkipNodeA(SkipNodeA* other, float w):
+    cdef long i
+    cdef SkipNodeA* sn = <SkipNodeA*>malloc(cython.sizeof(SkipNodeA))
+    _MEM_CHECK(sn)
+    sn.height = other.height
+    sn.index = other.index
+    sn.length = other.length
+    sn.capacity = other.capacity
+    sn.values = <float*>calloc(other.capacity, cython.sizeof(float))
+    _MEM_CHECK(sn.values)
+    for i in xrange(sn.length):
+        sn.values[i] = other.values[i] * w
+    sn.nextA = _newSkipNodeS(sn.height, NULL)
+    return sn
+    
 cdef void _delSkipNodeA(SkipNodeA* sn):
     if (sn != NULL):
         if (sn.values != NULL):
@@ -152,12 +182,14 @@ cdef void _delSkipList(SkipNodeA* head):
 
 cdef class SparseVector(object):
     cdef int height
-    cdef long long size
+    cdef float queryLength
+    cdef long queries
     cdef SkipNodeA* head
     cdef SkipNodeA** found
     
     def __init__(self, *arguments, **keywords):
-        self.size   = 0
+        self.queryLength = 1
+        self.queries = 1
         self.height = 0
         self.head   = _newSkipNodeA(MAX_HEIGHT, -1, -1)
         self.found  = _newSkipNodeS(MAX_HEIGHT, self.head)    
@@ -192,7 +224,7 @@ cdef class SparseVector(object):
                 b.append('|')
             for i in xrange(currA.length):
                 if currA.values[i] != 0:
-                    b.append('{0}:{1:.4}'.format(i + currA.index, currA.values[i]))
+                    b.append('{0}:{1:.4}'.format(currA.index + i, currA.values[i]))
             a.append(' '.join(b))
             currA = currA.nextA[0]
         return '\n'.join(a)
@@ -236,13 +268,22 @@ cdef class SparseVector(object):
         return a
 
     def update(self, dict f):
-        # bulk-insertion can not handle more than 2^32 data points
+        # bulk-insertion can not handle more than 2^32 continuous index span
         cdef list kvps = f.items()
         cdef long sz = len(kvps)
         cdef long i
         for i in xrange(sz):
             self.upsert(kvps[i][0], kvps[i][1])
+            
+    def addKeys(self, list f):
+        cdef long sz = len(f)
+        for i in xrange(sz):
+            self.upsert(f[i], 0)
     
+    def queryStats(self):
+        print self.queryLength / self.queries
+        print self.queryLength / self.queries, self._numOfNodes()
+        
     cdef foreach(self, funcA func):
         cdef SkipNodeA* currA = self.head.nextA[0]
         cdef long i
@@ -277,13 +318,29 @@ cdef class SparseVector(object):
             height -= 1
         self.height = height + 1
 
+    cdef updateQueryLength(self, int l):
+        self.queries += 1
+        self.queryLength += l
+        
     cdef bint updateList(self, long long index):
         cdef int height
         cdef SkipNodeA* currA = self.found[0]
         cdef SkipNodeA* nextA = currA.nextA[0]
+        cdef int l = 0
         if currA != NULL and nextA != NULL:
             if nextA.index <= index and nextA.index + nextA.length >= index:
+                self.updateQueryLength(1)
                 return True
+            elif index > nextA.index + nextA.length and nextA.nextA[0] != NULL:
+                # one lookahead
+                currA = nextA
+                nextA = currA.nextA[0]
+                if nextA.index <= index and nextA.index + nextA.length >= index:
+                    self.updateQueryLength(2)
+                    for height in xrange(currA.height):
+                        self.found[height] = currA
+                    return True
+                
         
         currA = self.head
         for height in reversed(xrange(self.height)):
@@ -292,7 +349,9 @@ cdef class SparseVector(object):
                 # allow the array to grow at the end
                 currA = currA.nextA[height]
                 nextA = currA.nextA[height]
+                l += 1
             self.found[height] = currA
+        self.updateQueryLength(l)
         return nextA != NULL
 
     cdef float find(self, long long index):
@@ -412,7 +471,14 @@ cdef class SparseVector(object):
             currA = currA.nextA[0]
     
     cpdef float norm1(self):
-        return self.forall(_FABS)
+        cdef SkipNodeA* currA = self.head.nextA[0]
+        cdef long i
+        cdef float result = 0
+        while currA != NULL:
+            for i in xrange(currA.length):
+                result += _FABS(currA.values[i])
+            currA = currA.nextA[0]
+        return result   
     
     cpdef float norm2(self):
         cdef SkipNodeA* currA = self.head.nextA[0]
@@ -488,16 +554,141 @@ cdef class SparseVector(object):
                 delta += currA2.index - frontier
                 frontier = currA2.index
         return result
-    
+        
+    cpdef addFast(self, SparseVector other, float w):
+        cdef SkipNodeA* currA1 = self.head.nextA[0]
+        cdef SkipNodeA* currA2 = other.head.nextA[0]
+        if currA1 == NULL or currA2 == NULL:
+            return
+            
+        cdef long long frontier = currA2.index
+        cdef long long delta = frontier - currA1.index
+        cdef long long endIndex1, endIndex2
+        cdef float* f1
+        cdef float* f2
+        while 1:
+            endIndex1 = currA1.index + currA1.length
+            endIndex2 = currA2.index + currA2.length
+
+            if delta > 0:
+                if frontier < endIndex1:
+                    delta = 0
+                else:
+                    delta = frontier - endIndex1
+            elif delta < 0:
+                if frontier - delta < endIndex2:
+                    frontier -= delta
+                    delta = 0
+                else:
+                    delta += endIndex2 - frontier
+                    frontier = endIndex2
+
+            f1 = currA1.values + frontier - currA1.index
+            f2 = currA2.values + frontier - currA2.index
+            while frontier < endIndex1 and frontier < endIndex2:
+                f1[0] += f2[0] * w
+                f1 += 1
+                f2 += 1
+                frontier += 1
+
+            if frontier >= endIndex1:
+                currA1 = currA1.nextA[0]
+                if currA1 == NULL:
+                    break
+                delta = frontier - currA1.index
+                
+            if frontier >= endIndex2:
+                currA2 = currA2.nextA[0]
+                if currA2 == NULL:
+                    break
+                delta += currA2.index - frontier
+                frontier = currA2.index
+        return
+        
     cpdef add(self, SparseVector other, float w):
-        cdef SkipNodeA* currA = other.head.nextA[0]
+        cdef SkipNodeA* currA1 = self.head.nextA[0]
+        cdef SkipNodeA* currA2 = other.head.nextA[0]
+        cdef SkipNodeA* neighbor
+        cdef int height
         cdef long i
-        cdef long long index
-        while currA != NULL:
-            for i in xrange(currA.length):
-                index = currA.index + i
-                self.upsert(index, self.find(index) + currA.values[i] * w)
-            currA = currA.nextA[0]
+        cdef long deltaBeg, deltaEnd
+        cdef long oldLength
+        
+        if currA2 == NULL:
+            return
+        
+        while currA2 != NULL:
+            self.updateList(currA2.index)
+            currA1 = self.found[0].nextA[0]
+            if currA1 == NULL:
+                break
+            deltaBeg = currA1.index - currA2.index
+            deltaEnd = currA2.length - currA1.length - deltaBeg
+            oldLength = currA1.length
+            # compute the new length and index
+            if deltaBeg > 0:
+                currA1.length += deltaBeg
+                currA1.index = currA2.index
+            if deltaEnd > 0:
+                currA1.length += deltaEnd
+            # increase memory if neccessary
+            if currA1.length > currA1.capacity:
+                currA1.capacity = currA1.length * 2
+                currA1.values = <float*>realloc(currA1.values, currA1.capacity * cython.sizeof(float))
+                _MEM_CHECK(currA1.values)
+            # add
+            if deltaBeg > 0:
+                # move values
+                for i in reversed(xrange(oldLength)):
+                    currA1.values[i + deltaBeg] = currA1.values[i]
+                for i in xrange(deltaBeg):
+                    currA1.values[i] = 0
+                deltaBeg = 0
+            if deltaEnd > 0:
+                # initialize to 0
+                for i in xrange(currA1.length - deltaEnd, currA1.length):
+                    currA1.values[i] = 0
+            for i in xrange(currA2.length):
+                currA1.values[i - deltaBeg] += currA2.values[i] * w
+            
+            if deltaEnd > 0:
+                # merge the neighboring node
+                neighbor = currA1.nextA[0]
+                while neighbor != NULL and neighbor.index <= currA1.index + currA1.length:
+                    deltaEnd = neighbor.index - currA1.index
+                    deltaBeg = _MIN(neighbor.length, currA1.index + currA1.length - neighbor.index)
+                    for i in xrange(deltaBeg):
+                        currA1.values[i + deltaEnd] += neighbor.values[i]
+                        
+                    # copy neighboring values
+                    oldLength = currA1.length
+                    currA1.length += neighbor.length - deltaBeg
+                    if currA1.length > currA1.capacity:
+                        currA1.capacity = currA1.length
+                        currA1.values = <float*>realloc(currA1.values, currA1.capacity * cython.sizeof(float))
+                        _MEM_CHECK(currA1.values)
+                    for i in xrange(neighbor.length - deltaBeg):
+                        currA1.values[oldLength + i] = neighbor.values[i + deltaBeg]
+                    # remove the neighboring node
+                    for height in xrange(neighbor.height):
+                        if self.found[height].nextA[height] == currA1:
+                            currA1.nextA[height] = neighbor.nextA[height]
+                        else:
+                            self.found[height].nextA[height] = neighbor.nextA[height]
+                    _delSkipNodeA(neighbor)
+                    self.redueHeight()
+                    neighbor = currA1.nextA[0]
+            currA2 = currA2.nextA[0]
+            
+        # copy to the end
+        while currA2 != NULL:
+            currA1 = _copySkipNodeA(currA2, w)
+            if currA1.height > self.height:
+                self.height = currA1.height
+            for height in xrange(currA1.height):
+                self.found[height].nextA[height] = currA1
+                self.found[height] = currA1
+            currA2 = currA2.nextA[0]
 
 cpdef SparseVector difference(SparseVector a, SparseVector b, float tol = 1e-8):
     cdef SparseVector c = SparseVector()
