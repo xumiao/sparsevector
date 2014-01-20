@@ -1,4 +1,4 @@
-sparsevector
+flexiblevector
 ============
 
 Implementation of a dynamic sparse vector in sparse_vector.pyx
